@@ -12,6 +12,40 @@ const path = require('path');
 
 const csvPath = process.argv[2] || path.join(__dirname, '..', 'data', '2025-player-NL-stats.csv');
 const outPath = path.join(__dirname, '..', 'data', 'players.json');
+const KNOWN_POSITIONS = ['C', '1B', '2B', '3B', 'SS', 'OF', 'DH', 'P', 'U'];
+
+const MLB_TEAM_IDS = {
+  ARI: 109,
+  ATL: 144,
+  BAL: 110,
+  BOS: 111,
+  CHC: 112,
+  CIN: 113,
+  CLE: 114,
+  COL: 115,
+  CWS: 145,
+  DET: 116,
+  HOU: 117,
+  KC: 118,
+  LAA: 108,
+  LAD: 119,
+  MIA: 146,
+  MIL: 158,
+  MIN: 142,
+  NYM: 121,
+  NYY: 147,
+  OAK: 133,
+  PHI: 143,
+  PIT: 134,
+  SD: 135,
+  SEA: 136,
+  SF: 137,
+  STL: 138,
+  TB: 139,
+  TEX: 140,
+  TOR: 141,
+  WAS: 120,
+};
 
 function parsePlayerField(raw) {
   // "Juan Soto OF | NYM" or "Shohei Ohtani U,P | LAD " -> name, position, team
@@ -73,12 +107,12 @@ function parseLine(line, columns, rowIndex) {
   let restStr;
   if (line.startsWith('"')) {
     const end = line.indexOf('",');
-    if (end === -1) return null;
+    if (end === -1) return { error: 'Malformed quoted Player field' };
     playerRaw = line.slice(1, end).replace(/""/g, '"');
     restStr = line.slice(end + 2);
   } else {
     const idx = line.indexOf(',');
-    if (idx === -1) return null;
+    if (idx === -1) return { error: 'Missing CSV delimiter' };
     playerRaw = line.slice(0, idx);
     restStr = line.slice(idx + 1);
   }
@@ -111,6 +145,11 @@ function parseLine(line, columns, rowIndex) {
     slg: num(columns.slg),
     fpts: num(columns.fpts),
   };
+  if (!player.name) return { error: 'Missing player name' };
+  if (!player.mlbTeam) return { error: 'Missing MLB team abbreviation' };
+  if (!player.positions.length) return { error: 'Missing/invalid positions' };
+  if (!player.mlbTeamId) return { error: `Unknown MLB team "${player.mlbTeam}"` };
+  return { player };
 }
 
 const csv = fs.readFileSync(csvPath, 'utf8');
@@ -145,6 +184,7 @@ if (missing.length) {
 }
 
 const players = [];
+const skippedRows = [];
 for (let i = 1; i < lines.length; i++) {
   const row = parseLine(lines[i], columns, i);
   if (row && row.playerName) players.push(row);
@@ -155,7 +195,16 @@ const unique = players.filter((player) => {
   if (seen.has(player.playerId)) return false;
   seen.add(player.playerId);
   return true;
-});
+}).map(({ _sourceRow, ...player }) => player);
 fs.mkdirSync(path.dirname(outPath), { recursive: true });
 fs.writeFileSync(outPath, JSON.stringify(unique, null, 0), 'utf8');
+console.log(
+  `Processed ${lines.length - 1} rows. Imported ${unique.length}. Skipped ${skippedRows.length}. Duplicates ${duplicateCount}.`
+);
+if (skippedRows.length) {
+  console.warn('Skipped row details (first 20):');
+  skippedRows.slice(0, 20).forEach((entry) => {
+    console.warn(`  row ${entry.row}: ${entry.reason}`);
+  });
+}
 console.log('Wrote', unique.length, 'players to', outPath);

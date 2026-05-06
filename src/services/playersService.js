@@ -1,8 +1,218 @@
-const fs = require('fs');
-const path = require('path');
+let _getDb = null;
+function tryGetDb() {
+  if (!_getDb) {
+    try { _getDb = require('../db/connection').getDb; } catch (_) {}
+  }
+  try { return _getDb ? _getDb() : null; } catch (_) { return null; }
+}
 
-const playersPath = path.join(__dirname, '..', '..', 'data', 'players.json');
-const fallbackPlayers = require('../../data/players');
+/** Convert a DB row back to the camelCase PlayerStub shape. */
+function rowToPlayer(row) {
+  return {
+    playerId:    row.player_id,
+    mlbPersonId: row.mlb_person_id,
+    name:        row.name,
+    playerName:  row.player_name,
+    positions:   JSON.parse(row.positions || '[]'),
+    position:    row.position,
+    mlbTeam:     row.mlb_team,
+    mlbTeamId:   row.mlb_team_id,
+    status:      row.status,
+    isAvailable: row.is_available === 1,
+    depthChartRank:     row.depth_chart_rank,
+    depthChartPosition: row.depth_chart_position,
+    ab:   row.ab,  r:   row.r,   h:   row.h,   hr:  row.hr,
+    rbi:  row.rbi, bb:  row.bb,  k:   row.k,   sb:  row.sb,
+    avg:  row.avg, obp: row.obp, slg: row.slg,
+    era:  row.era, whip: row.whip, w: row.w, sv: row.sv, ip: row.ip, k9: row.k9,
+    fpts: row.fpts,
+  };
+}
+
+function canonicalPositions(player) {
+  const positions = Array.isArray(player.positions)
+    ? player.positions
+    : String(player.position || '')
+        .split(',')
+        .map((v) => v.trim())
+        .filter(Boolean);
+  return [...new Set(positions.map((v) => String(v).toUpperCase()))].sort();
+}
+
+function playerQualityScore(player) {
+  const numericFields = ['ab', 'r', 'h', 'hr', 'rbi', 'bb', 'k', 'sb', 'avg', 'obp', 'slg', 'w', 'sv', 'ip', 'k9', 'fpts'];
+  const nonZeroCount = numericFields.reduce((count, field) => {
+    const value = Number(player[field] || 0);
+    return count + (value !== 0 ? 1 : 0);
+  }, 0);
+
+  const fpts = Number(player.fpts || 0);
+  const mlbPersonId = Number(player.mlbPersonId || 0);
+  // Real MLB IDs are typically 6+ digits; old synthetic IDs in this repo are often tiny.
+  const idReliabilityBonus = mlbPersonId >= 100000 ? 500 : 0;
+
+  return nonZeroCount * 1000 + fpts + idReliabilityBonus;
+}
+
+function playerIdentityKey(player) {
+  const mlbPersonId = Number(player.mlbPersonId || 0);
+  if (mlbPersonId >= 100000) return `pid:${mlbPersonId}`;
+  return [
+    String(player.name || player.playerName || '').trim().toLowerCase(),
+    String(player.mlbTeam || '').trim().toUpperCase(),
+  ].join('||');
+}
+
+function mergePlayerRecords(a, b) {
+  const base = playerQualityScore(a) >= playerQualityScore(b) ? { ...a } : { ...b };
+  const other = base === a ? b : a;
+
+  const mergedPositions = [...new Set([...canonicalPositions(base), ...canonicalPositions(other)])].sort();
+  base.positions = mergedPositions;
+  base.position = mergedPositions.join(',');
+
+  const numericFields = ['ab', 'r', 'h', 'hr', 'rbi', 'bb', 'k', 'sb', 'avg', 'obp', 'slg', 'era', 'whip', 'w', 'sv', 'ip', 'k9', 'fpts'];
+  for (const field of numericFields) {
+    const baseValue = Number(base[field] || 0);
+    const otherValue = Number(other[field] || 0);
+    if (baseValue === 0 && otherValue !== 0) base[field] = otherValue;
+  }
+
+  if (!base.mlbPersonId || Number(base.mlbPersonId) < 100000) {
+    const otherId = Number(other.mlbPersonId || 0);
+    if (otherId >= 100000) {
+      base.mlbPersonId = otherId;
+      base.playerId = `mlb-${otherId}`;
+    }
+  }
+
+  return base;
+}
+
+function hasReliablePersonId(player) {
+  return Number(player.mlbPersonId || 0) >= 100000;
+}
+
+function dedupePlayers(players = []) {
+  // First dedupe strict duplicates by playerId.
+  const byPlayerId = new Map();
+  for (const player of players) {
+    const id = String(player.playerId || '').trim();
+    if (!id) continue;
+    const existing = byPlayerId.get(id);
+    if (!existing || playerQualityScore(player) > playerQualityScore(existing)) {
+      byPlayerId.set(id, player);
+    }
+  }
+
+  // Then dedupe logical duplicates by identity and merge positions/stats.
+  const byIdentity = new Map();
+  for (const player of byPlayerId.values()) {
+    const key = playerIdentityKey(player);
+    if (!key || key.startsWith('||')) continue;
+
+    const existing = byIdentity.get(key);
+    if (!existing) byIdentity.set(key, player);
+    else byIdentity.set(key, mergePlayerRecords(existing, player));
+  }
+
+  // Final safety pass: collapse any remaining duplicates by visible identity
+  // (same player name + MLB team), which catches legacy low-ID records.
+  const byNameTeam = new Map();
+  for (const player of byIdentity.values()) {
+    const key = [
+      String(player.name || player.playerName || '').trim().toLowerCase(),
+      String(player.mlbTeam || '').trim().toUpperCase(),
+    ].join('||');
+    if (!key || key.startsWith('||')) continue;
+    const existing = byNameTeam.get(key);
+    if (!existing) byNameTeam.set(key, player);
+    else byNameTeam.set(key, mergePlayerRecords(existing, player));
+  }
+
+  const mergedByNameTeam = [...byNameTeam.values()];
+
+  // Extra cleanup: if same name+position has one reliable MLB ID record and one or more
+  // low-ID legacy records (often stale team aliases), keep the reliable record.
+  const byNamePos = new Map();
+  for (const player of mergedByNameTeam) {
+    const key = [
+      String(player.name || player.playerName || '').trim().toLowerCase(),
+      canonicalPositions(player).join('|'),
+    ].join('||');
+    if (!byNamePos.has(key)) byNamePos.set(key, []);
+    byNamePos.get(key).push(player);
+  }
+
+  const finalPlayers = [];
+  for (const group of byNamePos.values()) {
+    const reliable = group.filter(hasReliablePersonId);
+    const legacy = group.filter((p) => !hasReliablePersonId(p));
+    if (reliable.length === 1 && legacy.length >= 1) {
+      // Merge any useful non-zero stat/position info into the reliable row, then keep one row.
+      let merged = reliable[0];
+      for (const oldRow of legacy) merged = mergePlayerRecords(merged, oldRow);
+      finalPlayers.push(merged);
+    } else {
+      finalPlayers.push(...group);
+    }
+  }
+
+  return finalPlayers;
+}
+
+const STATS_JOIN_SQL = `
+  SELECT
+    p.player_id, p.mlb_person_id, p.name, p.player_name,
+    p.positions,  p.position,     p.mlb_team, p.mlb_team_id,
+    p.status,     p.is_available,
+    p.depth_chart_rank, p.depth_chart_position,
+    COALESCE(hs.ab,  0) AS ab,
+    COALESCE(hs.r,   0) AS r,
+    COALESCE(hs.h,   0) AS h,
+    COALESCE(hs.hr,  0) AS hr,
+    COALESCE(hs.rbi, 0) AS rbi,
+    COALESCE(hs.bb,  0) AS bb,
+    COALESCE(hs.k,   0) AS k,
+    COALESCE(hs.sb,  0) AS sb,
+    COALESCE(hs.avg, 0) AS avg,
+    COALESCE(hs.obp, 0) AS obp,
+    COALESCE(hs.slg, 0) AS slg,
+    COALESCE(ps.era,  0) AS era,
+    COALESCE(ps.whip, 0) AS whip,
+    COALESCE(ps.w,    0) AS w,
+    COALESCE(ps.sv,   0) AS sv,
+    COALESCE(ps.ip,   0) AS ip,
+    COALESCE(ps.k9,   0) AS k9,
+    (
+      COALESCE(hs.hr,  0) * 5 +
+      COALESCE(hs.rbi, 0) * 2 +
+      COALESCE(hs.r,   0) * 2 +
+      COALESCE(hs.sb,  0) * 3 +
+      COALESCE(ps.w,   0) * 7 +
+      COALESCE(ps.sv,  0) * 10 +
+      COALESCE(ps.ip,  0) * 0.5
+    ) AS fpts
+  FROM players p
+  LEFT JOIN player_stats hs
+    ON  hs.player_id  = p.player_id
+    AND hs.stat_group = 'hitting'
+    AND hs.season     = (SELECT MAX(season) FROM player_stats WHERE stat_group = 'hitting')
+  LEFT JOIN player_stats ps
+    ON  ps.player_id  = p.player_id
+    AND ps.stat_group = 'pitching'
+    AND ps.season     = (SELECT MAX(season) FROM player_stats WHERE stat_group = 'pitching')
+`;
+
+function loadPlayersFromDb() {
+  const db = tryGetDb();
+  if (!db) return null;
+  try {
+    const rows = db.prepare(STATS_JOIN_SQL).all();
+    if (!rows.length) return null;
+    return dedupePlayers(rows.map(rowToPlayer));
+  } catch (_) { return null; }
+}
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
@@ -22,12 +232,21 @@ const NUMERIC_FIELDS = new Set([
   'avg',
   'obp',
   'slg',
+  'era',
+  'whip',
+  'w',
+  'sv',
+  'ip',
+  'k9',
   'fpts',
 ]);
 
 const SORTABLE_FIELDS = new Set([
+  'name',
   'playerName',
-  'team',
+  'positions',
+  'mlbTeam',
+  'mlbTeamId',
   'position',
   'ab',
   'r',
@@ -40,6 +259,12 @@ const SORTABLE_FIELDS = new Set([
   'avg',
   'obp',
   'slg',
+  'era',
+  'whip',
+  'w',
+  'sv',
+  'ip',
+  'k9',
   'fpts',
 ]);
 
@@ -142,10 +367,31 @@ function parseSortOrder(value) {
 
 function toPositionTokens(value) {
   if (!value) return [];
+  if (Array.isArray(value)) {
+    return value
+      .map((v) => String(v).trim().toUpperCase())
+      .filter(Boolean);
+  }
   return String(value)
     .split(',')
     .map((v) => v.trim().toUpperCase())
     .filter(Boolean);
+}
+
+function normalizePositions(player, name) {
+  const tokens = toPositionTokens(player.positions || player.position);
+  if (tokens.length) return [...new Set(tokens)];
+  return fallbackPositionsFromName(name || player.playerName);
+}
+
+function parseAvailability(value) {
+  if (value === undefined || value === null || value === '') return true;
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+  const normalized = String(value).trim().toLowerCase();
+  if (['false', '0', 'no', 'n'].includes(normalized)) return false;
+  if (['true', '1', 'yes', 'y'].includes(normalized)) return true;
+  return Boolean(normalized);
 }
 
 function fallbackPositionsFromName(playerName) {
@@ -156,9 +402,9 @@ function fallbackPositionsFromName(playerName) {
 }
 
 function playerPositionTokens(player) {
-  const tokens = toPositionTokens(player.position);
+  const tokens = toPositionTokens(player.positions || player.position);
   if (tokens.length) return tokens;
-  return fallbackPositionsFromName(player.playerName);
+  return fallbackPositionsFromName(player.name || player.playerName);
 }
 
 function buildNumericRanges(query) {
@@ -212,7 +458,7 @@ function matchesSearch(player, search) {
 
 function matchesTeam(player, teams) {
   if (!teams.length) return true;
-  return teams.includes(String(player.team || '').toUpperCase());
+  return teams.includes(String(player.mlbTeam || '').toUpperCase());
 }
 
 function matchesPosition(player, positions) {
@@ -232,8 +478,8 @@ function matchesRanges(player, ranges) {
 }
 
 function comparePlayers(left, right, sortBy, direction) {
-  const leftValue = left[sortBy];
-  const rightValue = right[sortBy];
+  const leftValue = sortBy === 'positions' ? (left.positions || []).join(',') : left[sortBy];
+  const rightValue = sortBy === 'positions' ? (right.positions || []).join(',') : right[sortBy];
   const leftNumber = Number(leftValue);
   const rightNumber = Number(rightValue);
 
@@ -245,7 +491,9 @@ function comparePlayers(left, right, sortBy, direction) {
   }
 
   if (compare === 0) {
-    compare = String(left.playerName || '').localeCompare(String(right.playerName || ''));
+    compare = String(left.name || left.playerName || '').localeCompare(
+      String(right.name || right.playerName || '')
+    );
   }
   return compare * direction;
 }
@@ -279,7 +527,7 @@ function applyPlayersQuery(players, query) {
 }
 
 function getPlayerFilterOptions(players) {
-  const teams = [...new Set(players.map((player) => String(player.team || '').trim().toUpperCase()))]
+  const teams = [...new Set(players.map((player) => String(player.mlbTeam || '').trim().toUpperCase()))]
     .filter(Boolean)
     .sort();
 
@@ -300,4 +548,5 @@ module.exports = {
   buildPlayersQuery,
   applyPlayersQuery,
   getPlayerFilterOptions,
+  parseListParam,
 };

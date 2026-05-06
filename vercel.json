@@ -1,5 +1,6 @@
 {
-  "version": 2,
-  "builds": [{ "src": "api/index.js", "use": "@vercel/node" }],
-  "routes": [{ "src": "/(.*)", "dest": "api/index.js" }]
+  "outputDirectory": "examples/demo-ui",
+  "rewrites": [
+    { "source": "/(.*)", "destination": "https://player-data-api.onrender.com/$1" }
+  ]
 }
