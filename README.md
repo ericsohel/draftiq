@@ -1,8 +1,60 @@
-# Player Data API
+# DraftIQ — Player Data API
 
-Standalone **licensable** backend service for the **DraftIQ** fantasy baseball auction draft assistant. Provides real-time player data, auction-dollar valuations, and draft recommendations via a z-score-above-replacement engine backed by the live MLB Stats API.
+> A market maker for fantasy baseball auctions: real-time auction-dollar
+> valuations for 1,600+ MLB players from a z-score-above-replacement engine,
+> served as a production REST API.
 
-The Player Data API is one half of the DraftIQ system. The other half is the **Draft Kit** repo — a React + Express application that hosts the draft room UI, team management, and real-time bidding flow. The Draft Kit calls this API for player data and valuations; this API never calls the Draft Kit.
+![CI](https://github.com/ericsohel/draftiq/actions/workflows/ci.yml/badge.svg)
+
+**[Live developer portal](https://player-data-api.onrender.com/developer-portal/)** ·
+**[OpenAPI spec](docs/openapi.yaml)** ·
+**[See it running live on ericsohel.com](https://ericsohel.com)** (type `demo` in the terminal)
+
+## Try it right now — no API key
+
+```bash
+curl https://player-data-api.onrender.com/api/v1/demo/valuations
+```
+
+Returns the current top-10 players by auction value under default league
+settings. (Free-tier host — the first request after a quiet period takes
+~30–45s while the server cold-starts. The payload is cached 15 minutes.)
+
+## Highlights
+
+- **Valuation engine** — z-score above replacement with positional-scarcity
+  adjustments and live draft-state re-valuation: 600+ player valuations in
+  tens of milliseconds, feeding ranked nominations, positional-need scores,
+  and per-position budget allocations.
+- **Real-time ingestion** — tiered scheduler against the live MLB Stats API:
+  30-minute injury updates with active-hours gating, 6-hour depth charts and
+  transactions, daily metadata, seasonal stats. Idempotent jobs with
+  exponential backoff and staleness-aware metadata.
+- **Self-serve developer portal** — API-key management with scrypt password
+  hashing, signed-cookie sessions, per-key CIDR whitelisting (pure Node, no
+  library), sliding-window rate limiting, and a 30-day audit log.
+- **Engineering discipline** — 131 Jest/supertest tests (unit, integration,
+  state-transition); an OpenAPI 3.0 spec enforced by a CI drift-guard that
+  boots the app and verifies every documented path; deployed via GitHub
+  Actions to Render + Vercel.
+
+## Architecture
+
+```mermaid
+flowchart LR
+  MLB[MLB Stats API] -->|tiered scheduler| ING[Ingestion jobs]
+  ING --> DB[(SQLite)]
+  DB --> ENG[Valuation engine\nz-score above replacement]
+  ENG --> API[Express REST API]
+  API --> PORTAL[Developer portal]
+  API --> KIT[Draft Kit UI]
+  API --> DEMO[Public demo endpoint\npowers ericsohel.com]
+```
+
+The Player Data API is one half of the DraftIQ system. The other half is the
+**Draft Kit** — a React + Express application hosting the draft room UI, team
+management, and real-time bidding. The Draft Kit calls this API for player
+data and valuations; this API never calls the Draft Kit.
 
 ## Endpoints
 
@@ -11,6 +63,7 @@ All endpoints except `/api/v1/health` require `X-API-Key: <key>` or `Authorizati
 | Method | Path | Purpose |
 |--------|------|---------|
 | GET | `/api/v1/health` | Health check — no auth required |
+| GET | `/api/v1/demo/valuations` | Public cached top-10 showcase — no auth required |
 | GET | `/api/v1/license/check` | Validate a license key |
 | GET | `/api/v1/players` | Paginated player list with filters and sorting |
 | GET | `/api/v1/players/filters` | Available teams, positions, and sort fields |

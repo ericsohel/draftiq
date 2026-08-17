@@ -1,7 +1,7 @@
 {
-  "name": "player-data-api",
+  "name": "draftiq",
   "version": "1.0.0",
-  "description": "Licensable Player Data API for fantasy baseball draft kit",
+  "description": "DraftIQ — market maker for fantasy baseball auctions: valuation engine + licensable player data REST API",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",

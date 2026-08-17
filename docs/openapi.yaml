@@ -17,7 +17,7 @@ info:
 servers:
   - url: http://localhost:4001/api/v1
     description: Local dev
-  - url: https://your-render-deployment.onrender.com/api/v1
+  - url: https://player-data-api.onrender.com/api/v1
     description: Production
 
 security:
