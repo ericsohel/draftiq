@@ -37,6 +37,39 @@ paths:
         '200': { description: Healthy, content: { application/json: { schema: { $ref: '#/components/schemas/Health' } } } }
         '503': { description: DB disconnected, content: { application/json: { schema: { $ref: '#/components/schemas/Health' } } } }
 
+  /demo/valuations:
+    get:
+      summary: Public showcase — top players by auction value
+      description: |
+        Exempt from auth. Returns the top 10 players by dollar value under
+        default league settings (10-team, $260 cap). Payload is cached
+        in-process (15m default) and CORS-open; it powers the live widget on
+        ericsohel.com. Not for draft use — licensed routes serve live data.
+      security: []
+      responses:
+        '200':
+          description: Cached top-10 valuations
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:     { type: boolean }
+                  demo:        { type: boolean }
+                  note:        { type: string }
+                  computedAt:  { type: string, format: date-time }
+                  playerCount: { type: integer }
+                  top:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        rank:        { type: integer }
+                        name:        { type: string }
+                        dollarValue: { type: number }
+                        statGroup:   { type: string }
+        '503': { description: Stats not ingested yet, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
   /license/check:
     get:
       summary: Validate an API key

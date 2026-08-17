@@ -74,6 +74,12 @@ const { rateLimitByKey } = require('./middleware/rateLimit');
 app.use(`/api/${API_VERSION}/health`, healthRouter);
 app.use('/health', healthRouter);
 
+// /demo is likewise key-free: it serves a cached public showcase payload for
+// the live widget on ericsohel.com. Heavy work is cached in the controller,
+// and the route sets its own open CORS header (public data by design).
+const demoRouter = require('./routes/demo');
+app.use(`/api/${API_VERSION}/demo`, demoRouter);
+
 // Apply rate limiter ahead of the licensed mounts so 429 fires before route work.
 app.use(rateLimitByKey);
 
