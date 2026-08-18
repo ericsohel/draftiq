@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: write
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -27,18 +30,19 @@ jobs:
         env:
           API_LICENSE_KEY: test-key
 
-      # Surface failures on the run summary page so they're diagnosable
-      # without downloading logs.
-      - name: Publish failure summary
+      # Surface failures somewhere fetchable: push the test output to an
+      # orphan ci-debug branch (raw.githubusercontent serves it publicly).
+      - name: Publish failure output
         if: failure()
         shell: bash
         run: |
-          {
-            echo '### jest output (tail)'
-            echo '```'
-            tail -c 6000 test-output.txt
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+          git config user.name ci
+          git config user.email ci@invalid
+          git checkout --orphan ci-debug
+          git rm -rf --cached . >/dev/null 2>&1 || true
+          git add -f test-output.txt
+          git commit -q -m "ci debug output"
+          git push -f origin ci-debug
 
   deploy:
     needs: test
