@@ -302,9 +302,20 @@ function inferMlbPersonId(player, index) {
 
 function normalizePlayerRecord(player, index) {
   const mlbPersonId = inferMlbPersonId(player, index);
-  const { id, ...rest } = player;
+  // The fallback JSON predates the PlayerStub shape (playerName/position/
+  // team singulars); translate so fallback mode serves the same documented
+  // shape as the DB path (name/mlbTeam/mlbTeamId/positions[]).
+  const { id, playerName, position, team, teamId, ...rest } = player;
   return {
     ...rest,
+    name: player.name ?? playerName ?? '',
+    positions: Array.isArray(player.positions)
+      ? player.positions
+      : position
+        ? [position]
+        : [],
+    mlbTeam: player.mlbTeam ?? team ?? '',
+    mlbTeamId: String(player.mlbTeamId ?? teamId ?? ''),
     mlbPersonId,
     playerId: `mlb-${mlbPersonId}`,
   };
