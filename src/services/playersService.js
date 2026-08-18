@@ -453,14 +453,16 @@ function buildPlayersQuery(query = {}) {
 
 function matchesSearch(player, search) {
   if (!search) return true;
-  const name = String(player.playerName || '').toLowerCase();
-  const team = String(player.team || '').toLowerCase();
-  const position = String(player.position || '').toLowerCase();
+  // PlayerStub shape: name / mlbTeam / positions[] (see rowToPlayer). The
+  // old singular field names matched nothing, silently breaking search.
+  const name = String(player.name || '').toLowerCase();
+  const team = String(player.mlbTeam || '').toLowerCase();
+  const positions = (Array.isArray(player.positions) ? player.positions.join(' ') : String(player.positions || '')).toLowerCase();
   const playerId = String(player.playerId || '').toLowerCase();
   return (
     name.includes(search) ||
     team.includes(search) ||
-    position.includes(search) ||
+    positions.includes(search) ||
     playerId.includes(search)
   );
 }
