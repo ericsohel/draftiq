@@ -315,7 +315,7 @@ function normalizePlayerRecord(player, index) {
         ? [position]
         : [],
     mlbTeam: player.mlbTeam ?? team ?? '',
-    mlbTeamId: String(player.mlbTeamId ?? teamId ?? ''),
+    mlbTeamId: String(player.mlbTeamId ?? teamId ?? '') || teamIdFor(player.mlbTeam ?? team),
     mlbPersonId,
     playerId: `mlb-${mlbPersonId}`,
   };
@@ -329,6 +329,22 @@ const fs = require('fs');
 const path = require('path');
 const playersPath = path.join(__dirname, '..', '..', 'data', 'players.json');
 const fallbackPlayers = [];
+
+// MLB Stats API team ids, for deriving mlbTeamId when the fallback JSON
+// only carries an abbreviation. Includes common alternate abbreviations.
+const TEAM_ID_BY_ABBREV = {
+  LAA: 108, ARI: 109, AZ: 109, BAL: 110, BOS: 111, CHC: 112, CIN: 113,
+  CLE: 114, COL: 115, DET: 116, HOU: 117, KC: 118, KCR: 118, LAD: 119,
+  WSH: 120, WSN: 120, NYM: 121, OAK: 133, ATH: 133, PIT: 134, SD: 135,
+  SDP: 135, SEA: 136, SF: 137, SFG: 137, STL: 138, TB: 139, TBR: 139,
+  TEX: 140, TOR: 141, MIN: 142, PHI: 143, ATL: 144, CWS: 145, CHW: 145,
+  MIA: 146, NYY: 147, MIL: 158,
+};
+
+function teamIdFor(abbrev) {
+  const id = TEAM_ID_BY_ABBREV[String(abbrev || '').trim().toUpperCase()];
+  return id ? `mlb-${id}` : '';
+}
 
 function loadPlayers() {
   let players = fallbackPlayers;
