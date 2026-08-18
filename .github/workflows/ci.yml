@@ -19,9 +19,26 @@ jobs:
 
       - run: npm ci
 
-      - run: npm test
+      - name: Run tests
+        shell: bash
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee test-output.txt
         env:
           API_LICENSE_KEY: test-key
+
+      # Surface failures on the run summary page so they're diagnosable
+      # without downloading logs.
+      - name: Publish failure summary
+        if: failure()
+        shell: bash
+        run: |
+          {
+            echo '### jest output (tail)'
+            echo '```'
+            tail -c 6000 test-output.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
   deploy:
     needs: test
