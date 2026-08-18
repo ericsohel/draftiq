@@ -1,13 +1,10 @@
-name: CI/CD
+name: CI
 
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
-
-permissions:
-  contents: write
 
 jobs:
   test:
@@ -22,32 +19,9 @@ jobs:
 
       - run: npm ci
 
-      - name: Run tests
-        shell: bash
-        run: |
-          set -o pipefail
-          npm test 2>&1 | tee test-output.txt
+      - run: npm test
         env:
           API_LICENSE_KEY: test-key
 
-      # Surface failures somewhere fetchable: push the test output to an
-      # orphan ci-debug branch (raw.githubusercontent serves it publicly).
-      - name: Publish failure output
-        if: failure()
-        shell: bash
-        run: |
-          git config user.name ci
-          git config user.email ci@invalid
-          git checkout --orphan ci-debug
-          git rm -rf --cached . >/dev/null 2>&1 || true
-          git add -f test-output.txt
-          git commit -q -m "ci debug output"
-          git push -f origin ci-debug
-
-  deploy:
-    needs: test
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    steps:
-      - name: Trigger Render deploy
-        run: curl -fsSX POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
+  # Deploys happen via Render's native GitHub integration on push to main —
+  # no deploy hook needed here.
