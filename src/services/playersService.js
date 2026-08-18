@@ -310,6 +310,15 @@ function normalizePlayerRecord(player, index) {
   };
 }
 
+// JSON fallback for when the DB is unavailable (isolated tests, cold local
+// runs). The DB-only refactor removed these definitions but left loadPlayers
+// referencing them, so the fallback path threw ReferenceError instead of
+// degrading gracefully.
+const fs = require('fs');
+const path = require('path');
+const playersPath = path.join(__dirname, '..', '..', 'data', 'players.json');
+const fallbackPlayers = [];
+
 function loadPlayers() {
   let players = fallbackPlayers;
   try {
