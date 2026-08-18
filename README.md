@@ -6,14 +6,14 @@
 
 ![CI](https://github.com/ericsohel/draftiq/actions/workflows/ci.yml/badge.svg)
 
-**[Live developer portal](https://player-data-api.onrender.com/developer-portal/)** ·
+**[Live developer portal](https://draftiq-xkpx.onrender.com/developer-portal/)** ·
 **[OpenAPI spec](docs/openapi.yaml)** ·
 **[See it running live on ericsohel.com](https://ericsohel.com)** (type `demo` in the terminal)
 
 ## Try it right now — no API key
 
 ```bash
-curl https://player-data-api.onrender.com/api/v1/demo/valuations
+curl https://draftiq-xkpx.onrender.com/api/v1/demo/valuations
 ```
 
 Returns the current top-10 players by auction value under default league
@@ -251,7 +251,7 @@ To deploy:
 1. Connect the repo to Render — it auto-detects `render.yaml`. Set `API_LICENSE_KEY` and `ADMIN_API_KEY` in the Render dashboard.
 2. Connect the repo to Vercel — it auto-detects `outputDirectory: "examples/demo-ui"` in `vercel.json`. No env vars needed on Vercel.
 
-**External apps** (non-browser) should call the Render service URL directly: `https://player-data-api.onrender.com`.
+**External apps** (non-browser) should call the Render service URL directly: `https://draftiq-xkpx.onrender.com`.
 
 ## Project structure
 
@@ -294,7 +294,7 @@ vercel.json                 Vercel static site + /api/* proxy config
 
 The Draft Kit calls this API directly (not through Vercel). In the Draft Kit repo set:
 
-- `PLAYER_API_URL` — `https://player-data-api.onrender.com` (or `http://localhost:4001` for local dev)
+- `PLAYER_API_URL` — `https://draftiq-xkpx.onrender.com` (or `http://localhost:4001` for local dev)
 - `PLAYER_API_KEY` — your license key
 
 Then:
